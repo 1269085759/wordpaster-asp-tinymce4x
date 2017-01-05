@@ -116,6 +116,10 @@ function WordPasterManager()
 	this.fileMap = new Object();//文件映射表。
 	this.postType = WordPasteImgType.word;//默认是word
 	this.working = false;//正在上传中
+	this.event = {
+	    "postComplete": function (url) { }
+        , "queueComplete": function () { }
+	};
 
     //IE浏览器信息管理对象
 	this.BrowserIE = {
@@ -769,6 +773,7 @@ function WordPasterManager()
 	};
 	this.WordParser_PostComplete = function (json)
 	{
+	    this.event.postComplete(json.value);
 	    this.imgPercent.text("100%");
 	    this.imgMsg.text("上传完成");
 	    var img = "<img src=\"";
@@ -791,6 +796,7 @@ function WordPasterManager()
 	};
 	this.File_PostComplete = function (json)
 	{
+	    this.event.postComplete(json.pathSvr);
 	    var up = this.fileMap[json.id];
 	    up.postComplete(json);
 	    delete up;//
@@ -818,6 +824,7 @@ function WordPasterManager()
 	    }
 	    this.CloseDialogFile();
 	    _this.working = false;
+	    this.event.queueComplete();
 	};
 	this.WordParser_StateChanged = function (msg)
 	{
