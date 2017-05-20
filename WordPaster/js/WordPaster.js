@@ -26,13 +26,14 @@ var WordPasterError = {
 var WordPasterConfig = {
 	"EncodeType"		    : "GB2312"
 	, "Company"			    : "荆门泽优软件有限公司"
-	, "Version"			    : "1,5,123,31671"
+	, "Version"			    : "1,5,125,50965"
 	, "License"			    : ""
 	, "Debug"			    : false//调试模式
 	, "LogFile"			    : "f:\\log.txt"//日志文件路径
 	, "PasteWordType"	    : ""	//粘贴WORD的图片格式。JPG/PNG/GIF/BMP，推荐使用JPG格式，防止出现大图片。
 	, "PasteImageType"	    : ""	//粘贴文件，剪帖板的图片格式，为空表示本地图片格式。JPG/PNG/GIF/BMP
-	, "JpgQuality"		    : "100"	//JPG质量。0~100
+	, "PasteImgSrc"		    : ""	//shape:优先使用源公式图片，img:使用word自动生成的图片
+    , "JpgQuality"		    : "100"	//JPG质量。0~100
 	, "QueueCount"		    : "5"	//同时上传线程数
 	, "CryptoType"		    : "uuid"//名称计算方式,md5,crc,sha1,uuid，其中uuid为随机名称
 	, "ThumbWidth"		    : "0"	//缩略图宽度。0表示不使用缩略图
@@ -60,7 +61,8 @@ var WordPasterConfig = {
     , "NatHostName"         : "com.xproer.wordpaster"//
     , "ExtensionID"         : "nmopflahkgegkgkfnhdjpflfjipkpjpk"
 	, "NatPath"		        : "http://www.ncmem.com/download/WordPaster2/WordPaster.nat.crx"
-	, "ExePath"		        : "http://www.ncmem.com/download/WordPaster2/WordPaster.exe"
+    , edge: { protocol: "wordpaster", port: 9200, visible: false }
+	, "ExePath": "http://www.ncmem.com/download/WordPaster2/WordPaster.exe"
 };
 function debugMsg(m) { $("#msg").append(m);}
 var WordPasterActiveX = {
@@ -69,13 +71,6 @@ var WordPasterActiveX = {
 	, "WordParser64"	: "Xproer.WordParser2x64"
 };
 
-//浏览器版本
-var BrowserVersion = {
-    IE: 0
-	, IE64: 1
-	, Firefox: 2
-	, Chrome: 3
-};
 var WordPasteImgType = {local:0/*本地图片*/,network:1/*网络图片*/,word:2/*word图片*/};
 
 /*
@@ -97,14 +92,16 @@ function WordPasterManager()
     this.imgIco = null;//jquery obj
     this.imgMsg = null;//jquery obj
     this.imgPercent = null;//jquery obj
+    this.ui = { setup: null ,single:null};
     this.ffPaster = null;
     this.ieParser = null;
+    this.ffPasterName = "ffPaster" + new Date().getTime();
+    this.iePasterName = "iePaster" + new Date().getTime();
     this.setuped = false;//控件是否安装
     this.natInstalled = false;
     this.filesPanel = null;//jquery obj
     this.fileItem = null;//jquery obj
     this.line = null;//jquery obj
-    this.BrowserVer = BrowserVersion.IE;
 	this.ActiveX = WordPasterActiveX;
 	this.Config = WordPasterConfig;
 	this.EditorContent = ""; //编辑器内容。当图片上传完后需要更新此变量值
@@ -116,256 +113,28 @@ function WordPasterManager()
 	this.fileMap = new Object();//文件映射表。
 	this.postType = WordPasteImgType.word;//默认是word
 	this.working = false;//正在上传中
-	this.event = {
-	    "postComplete": function (url) { }
-        , "queueComplete": function () { }
-	};
-
-    //IE浏览器信息管理对象
-	this.BrowserIE = {
-	    "GetHtml": function ()
-	    {
-	        /*ActiveX的静态加载方式，如果在框架页面中使用此控件，推荐使用静态加截方式。
-			<div style="display: none">
-			<object id="Paster" classid="clsid:2404399F-F06B-477F-B407-B8A5385D2C5E" codebase="http://www.ncmem.com/WordPaster.cab#version=1,6,26,54978" width="1" height="1"></object>
-			</div>
-			*/
-	        var acx = '<div style="display: none">';
-	        //Word解析组件
-	        acx += ' <object id="objWordParser" classid="clsid:' + _this.Config["ClsidParser"] + '"';
-	        acx += ' codebase="' + _this.Config["CabPath"] + '#version=' + _this.Config["Version"] + '"';
-	        acx += ' width="1" height="1" ></object>';
-	        acx += '</div>';
-	        return acx;
-	    }
-		, "Check": function ()
-		{
-		    try
-		    {
-		        var v = _this.ieParser.Version;
-		        return true;
-		    }
-		    catch (e) { return false; }
-		}
-	    , "CheckVer": function ()
-	    {
-	        try
-	        {
-	            return _this.ieParser.Version != _this.Config["Version"];
-	        }
-	        catch (e) { return true; }
-	    }
-		, "Init": function () { }
-	};
-    //FireFox浏览器信息管理对象
-	this.BrowserFF = {
-	    "GetHtml": function ()
-	    {
-	        var html = '<embed type="' + _this.Config["XpiType"] + '" pluginspage="' + _this.Config["XpiPath"] + '" width="1" height="1" id="objWordPaster"/>';
-	        return html;
-	    }
-        , "Check": function ()
-        {
-            var mimetype = navigator.mimeTypes;
-            if (typeof mimetype == "object" && mimetype.length)
-            {
-                for (var i = 0; i < mimetype.length; i++)
-                {
-                	var exist = mimetype[i].type == _this.Config["XpiType"];//low ff
-                	if(!exist) exist = mimetype[i].type == _this.Config["XpiType"].toLowerCase();//high ff
-                	if(exist) return mimetype[i].enabledPlugin;
-                }
-            }
-            else
-            {
-                mimetype = [_this.Config["XpiType"]];
-            }
-            if (mimetype)
-            {
-                return mimetype.enabledPlugin;
-            }
-            return false;
-        }
-	    , "CheckVer": function ()
-	    {
-	        try
-	        {
-	            return _this.ffPaster.Version != _this.Config["Version"];
-	        }
-	        catch (e) { return true;}
-	    }//安装插件
-		, "Setup": function ()
-		{
-		    var xpi = new Object();
-		    xpi["Calendar"] = _this.Config["XpiPath"];
-		    InstallTrigger.install(xpi, function (name, result) { });
-		}
-		, "Init": function () { }
-	};
-    //Chrome浏览器信息管理对象
-	this.BrowserChrome = {
-	    "GetHtml": function ()
-	    {
-	        var html = '<embed type="' + _this.Config["CrxType"] + '" pluginspage="' + _this.Config["CrxPath"] + '" width="1" height="1" id="objWordPaster"/>';
-	        return html;
-	    }
-		, "Check": function ()
-		{
-		    for (var i = 0, l = navigator.plugins.length; i < l; i++)
-		    {
-		        if (navigator.plugins[i].name == _this.Config["CrxName"])
-		        {
-		            return true;
-		        }
-		    }
-		    return false;
-		}
-	    , "CheckVer": function ()
-	    {
-	        try
-	        {
-	            return _this.ffPaster.Version != _this.Config["Version"];
-	        }
-	        catch (e) { return true; }
-	    } //安装插件
-		, "Setup": function ()
-		{
-		    document.write('<iframe style="display:none;" src="' + _this.Config["XpiPath"] + '"></iframe>');
-		}
-		, "Init": function () { }
-	};
-	this.BrowserNat = {
-	    "GetHtml": function ()
-	    {
-	        var html = '<embed type="' + _this.Config["CrxType"] + '" pluginspage="' + _this.Config["CrxPath"] + '" width="1" height="1" id="objWordPaster"/>';
-	        return html;
-	    }
-		, "Check": function ()
-		{
-		    var img = document.createElement('img');
-		    img.src = 'chrome-extension://' + _this.Config.ExtensionID + '/icon.jpg';
-		    img.onload = function () { _this.natInstalled = true; };
-		    img.onerror = function () { _this.setupTip(); };
-		    //chrome.management.get(_this.Config.ExtensionID, function (exInf) { _this.natInstall = true; });
-		    return true;
-		}
-	    , "CheckVer": function ()
-	    {
-	        return false;
-	    } //安装插件
-		, "Setup": function ()
-		{
-		    document.write('<iframe style="display:none;" src="' + _this.Config["XpiPath"] + '"></iframe>');
-		}
-		, "Init": function (){}
-	};
-
-    //WordParser Control
-	this.WordParserIE = {
-	    "Init": function ()
-	    {
-	        if (!_this.Browser.Check()) return;
-	        this.parser = _this.ieParser;
-	        var param = { config: _this.Config, fields: _this.Fields };
-	        this.parser.Init(JSON.stringify(param));
-	        this.parser.StateChanged = _this.WordParser_StateChanged;
-	    }
-        , "Paste": function ()
-        {
-            if (_this.working) return;
-            _this.working = true;
-            _this.ieParser.Paste()
-        }
-        , "PasteAuto": function (html)
-        {
-            if (_this.working) return;
-            _this.working = true;
-            _this.ieParser.PasteAuto(html)
-        }
-        , "HasData": function () { return _this.ieParser.HasData();}
-	};
-	this.WordParserFF = {
-	    "Init": function ()
-	    {
-	        if (!_this.Browser.Check()) return;
-	        this.parser = _this.ffPaster;
-	        var param = { config: _this.Config, fields: _this.Fields };
-	        this.parser.Init(JSON.stringify(param));
-	        this.parser.StateChanged = _this.WordParser_StateChanged;
-	    }
-        , "Paste": function ()
-        {
-            if (_this.working) return;
-            _this.working = true;
-            _this.ffPaster.Paste();
-        }
-        , "PasteAuto": function (html)
-        {
-            if (_this.working) return;
-            _this.working = true;
-            _this.ffPaster.PasteAuto(html)
-        }
-        , "HasData": function () { return _this.ffPaster.HasData(); }
-	};
-    //chrome 45 Native Message
-	this.WordParserNat = {
-	     "entID": "WordPasterEvent"
-	    ,"Init": function ()
-	    {
-	        this.exitEvent();
-	        document.addEventListener('WordPasterEventCallBack', function (evt)
-	        {
-	            _this.WordParser_StateChanged(JSON.stringify(evt.detail));
-	        });
-	    }
-        , "Paste": function ()
-        {
-            if (_this.working) return;
-            _this.working = true;
-            var par = { name: 'Paste', config: _this.Config, fields: _this.Fields };
-            var evt = document.createEvent("CustomEvent");
-            evt.initCustomEvent(this.entID, true, false, par);
-            document.dispatchEvent(evt);
-        }
-        , "PasteAuto": function (html)
-        {
-            if (_this.working) return;
-            _this.working = true;
-            var par = { name: 'PasteAuto', data: html,config: _this.Config, fields: _this.Fields };
-            var evt = document.createEvent("CustomEvent");
-            evt.initCustomEvent(this.entID, true, false, par);
-            document.dispatchEvent(evt);
-        }
-        , "exit": function ()
-        {
-            var par = { name: 'exit'};
-            var evt = document.createEvent("CustomEvent");
-            evt.initCustomEvent(this.entID, true, false, par);
-            document.dispatchEvent(evt);
-        }
-        , "exitEvent": function ()
-        {
-            var obj = this;
-            $(window).bind("beforeunload", function () { obj.exit(); });
-        }
-	};
-	this.WordParser = this.WordParserIE;
-	this.Browser = this.BrowserIE;
-	var browserName = navigator.userAgent.toLowerCase();
+    this.edgeApp = new WebServer(this);
+    this.app = WordPasterApp;
+    this.app.ins = this;
+    var browserName = navigator.userAgent.toLowerCase();
 	this.ie = browserName.indexOf("msie") > 0;
     //IE11
 	this.ie = this.ie ? this.ie : browserName.search(/(msie\s|trident.*rv:)([\w.]+)/) != -1;
 	this.firefox = browserName.indexOf("firefox") > 0;
 	this.chrome = browserName.indexOf("chrome") > 0;
 	this.chrome45 = false;
+	this.edge = navigator.userAgent.indexOf("Edge") > 0;
 	this.chrVer = navigator.appVersion.match(/Chrome\/(\d+)/);
+	if (this.edge) { this.ie = this.firefox = this.chrome = this.chrome45 = false; }
 
+    $(window).bind("beforeunload", function () {
+        if (this.edge) _this.edgeApp.close();
+    });
 	if (this.ie)
 	{
 	    //Win64
 	    if (window.navigator.platform == "Win64")
 	    {
-	        _this.BrowserVer = BrowserVersion.IE64;
 	        _this.Config["ClsidParser"] = this.Config["ClsidParser64"];
 	        _this.Config["CabPath"] = this.Config["CabPath64"];
 	        //ActiveX
@@ -373,41 +142,50 @@ function WordPasterManager()
 	    }
 	} //Firefox
 	else if (this.firefox)
-	{
-	    _this.BrowserVer = BrowserVersion.Firefox;
-	    _this.Browser = this.BrowserFF;
-	    this.WordParser = this.WordParserFF;
+    {
+        if (!this.app.supportFF())//仍然支持npapi
+        {
+            this.app.postMessage = this.app.postMessageEdge;
+            this.edge = true;
+        }
 	} //chrome
 	else if (this.chrome)
 	{
-	    _this.BrowserVer = BrowserVersion.Chrome;
 	    _this.Config["XpiPath"] = _this.Config["CrxPath"];
 	    _this.Config["XpiType"] = _this.Config["CrxType"];
-	    _this.Browser = this.BrowserChrome;
-	    this.WordParser = this.WordParserFF;
 	    //44+版本使用Native Message
 	    if (parseInt(this.chrVer[1]) >= 44)
 	    {
-	        if (!this.BrowserChrome.Check())//仍然支持npapi
-	        {
-	            _this.chrome45 = true;//
-	            _this.Browser = this.BrowserNat;
-	            _this.Browser.Check();
-	            this.WordParser = this.WordParserNat;
+            if (!this.app.supportFF())//仍然支持npapi
+            {
+                this.app.postMessage = this.app.postMessageEdge;
+                this.edge = true;
 	        }
 	    }
 	}
-
-	this.setupTip = function ()
+	else if (this.edge)
+    {
+        this.app.postMessage = this.app.postMessageEdge;
+	}
+    this.setup_tip = function () {
+        this.ui.setup.skygqbox();
+        var dom = this.ui.setup.html("控件加载中，如果未加载成功请先<a name='w-exe'>安装控件</a>");
+        var lnk = dom.find('a[name="w-exe"]');
+        lnk.attr("href", this.Config["ExePath"]);
+    };
+    this.need_update = function ()
+    {
+        var dom = this.ui.setup.html("发现新版本，请<a name='w-exe' href='#'>更新</a>");
+        var lnk = dom.find('a[name="w-exe"]');
+        lnk.attr("href", this.Config["ExePath"]);
+    };
+	this.setupTipClose = function ()
 	{
-	    this.OpenDialogPaste();
-	    var dom = this.imgMsg.html("未检测到控件，请先<a name='aCtl'>安装控件</a>,Chrome 45+需要单独<a name='aCrx'>安装扩展</a>");
-	    var lnk = dom.find('a[name="aCtl"]');
-	    lnk.attr("href", this.Config["ExePath"]);
-	    var crx = dom.find('a[name="aCrx"]');
-	    crx.attr("href", this.Config["NatPath"]);
-	    this.imgPercent.hide();
-	    this.imgIco.hide();
+	    var dom = this.imgMsg.html("图片上传中......");
+	    this.imgPercent.show();
+	    this.imgIco.show();
+        this.CloseDialogPaste();
+        this.setuped = true;
 	};
 	this.CheckUpdate = function ()
 	{
@@ -431,15 +209,17 @@ function WordPasterManager()
 			静态加截控件代码，在复杂WEB系统中或者框架页面中请静态方式加截Word解析组件(Xproer.WordParser)。
 			<object id="objWordParser" classid="clsid:2404399F-F06B-477F-B407-B8A5385D2C5E"	width="1" height="1" ></object>
 		*/
-	    if(!this.chrome45) acx += '<embed name="ffPaster" type="' + this.Config["XpiType"] + '" pluginspage="' + this.Config["XpiPath"] + '" width="1" height="1" id="objWordPaster"/>';
-	    //Word解析组件
-	    acx += ' <object name="ieParser" classid="clsid:' + this.Config["ClsidParser"] + '"';
+        if (!this.chrome45) acx += '<embed name="' + this.ffPasterName + '" type="' + this.Config["XpiType"] + '" pluginspage="' + this.Config["XpiPath"] + '" width="1" height="1"/>';
+        //Word解析组件
+        acx += ' <object name="' + this.iePasterName + '" classid="clsid:' + this.Config["ClsidParser"] + '"';
 	    acx += ' codebase="' + this.Config["CabPath"] + '#version=' + this.Config["Version"] + '"';
 	    acx += ' width="1" height="1" ></object>';
 	    //单张图片上传窗口
 	    acx += '<div name="imgPasterDlg" class="panel-paster" style="display:none;">';
 	    acx += '<img name="ico" id="infIco" alt="进度图标" src="' + this.Config["IcoUploader"] + '" /><span name="msg">图片上传中...</span><span name="percent">10%</span>';
-	    acx += '</div>';
+        acx += '</div>';
+        //安装提示
+        acx += '<div name="ui-setup" class="panel-paster panel-setup"></div>';
 	    //图片批量上传窗口
 	    acx += '<div name="filesPanel" class="panel-files" style="display: none;"></div>';
 	    //
@@ -470,9 +250,9 @@ function WordPasterManager()
     //加载控件及HTML元素
 	this.Load = function ()
 	{
-	    var dom             = $(document.body).append(this.GetHtml());
-	    this.ffPaster       = dom.find('embed[name="ffPaster"]').get(0);
-	    this.ieParser       = dom.find('object[name="ieParser"]').get(0);
+        var dom             = $(document.body).append(this.GetHtml());
+        this.ffPaster       = dom.find('embed[name="' + this.ffPasterName + '"]').get(0);
+        this.ieParser       = dom.find('object[name="' + this.iePasterName + '"]').get(0);
 	    this.line           = dom.find('div[name="line"]');
 	    this.fileItem       = dom.find('div[name="fileItem"]');
 	    this.filesPanel     = dom.find('div[name="filesPanel"]');
@@ -481,6 +261,8 @@ function WordPasterManager()
 	    this.imgIco         = this.imgPasterDlg.find('img[name="ico"]');
 	    this.imgMsg         = this.imgPasterDlg.find('span[name="msg"]');
 	    this.imgPercent     = this.imgPasterDlg.find('span[name="percent"]');
+        this.ui.single      = dom.find('div[name="imgPasterDlg"]');
+        this.ui.setup       = dom.find('div[name="ui-setup"]');
 
 	    this.init();
 	};
@@ -488,16 +270,18 @@ function WordPasterManager()
 	this.LoadTo = function (oid)
 	{
 	    var dom             = $("#" + oid).append(this.GetHtml());
-	    this.ffPaster       = dom.find('embed[name="ffPaster"]').get(0);
-	    this.ieParser       = dom.find('object[name="ieParser"]').get(0);
+        this.ffPaster       = dom.find('embed[name="' + this.ffPasterName + '"]').get(0);
+        this.ieParser       = dom.find('object[name="' + this.iePasterName + '"]').get(0);
 	    this.line           = dom.find('div[name="line"]');
 	    this.fileItem       = dom.find('div[name="fileItem"]');
 	    this.filesPanel     = dom.find('div[name="filesPanel"]');
 	    this.imgUploaderDlg = dom.find('div[name="filesPanel"]');
-	    this.imgPasterDlg   = dom.find('div[name="imgPasterDlg"]');
+        this.imgPasterDlg   = dom.find('div[name="imgPasterDlg"]');
+        this.ui.single      = dom.find('div[name="imgPasterDlg"]');
 	    this.imgIco         = this.imgPasterDlg.find('img[name="ico"]');
 	    this.imgMsg         = this.imgPasterDlg.find('span[name="msg"]');
 	    this.imgPercent     = this.imgPasterDlg.find('span[name="percent"]');
+        this.ui.setup       = dom.find('div[name="ui-setup"]');
 
 	    this.init();
 	};
@@ -506,18 +290,18 @@ function WordPasterManager()
 	this.init = function ()
 	{
 	    $(function ()
-	    {
-	        _this.setuped = _this.Browser.Check();
-	        if (_this.setuped)
-	        {
-	            _this.WordParser.Init();//
-
-	            _this.CheckUpdate();//
-	        }
-	        else
-	        {
-	            _this.setupTip();
-	        }
+        {
+            if (!_this.edge)
+            {
+                _this.parter = _this.ffPaster;
+                if (_this.ie) _this.parter = _this.ieParser;
+                _this.parter.recvMessage = _this.recvMessage;
+            }
+            _this.setup_tip();
+            if (_this.edge) {
+                _this.edgeApp.runChr();
+            }
+            else { _this.app.init(); }
 	    });
 	};
 
@@ -561,22 +345,21 @@ function WordPasterManager()
 	this.Paste = function ()
 	{
 	    if (!this.setuped)
+        {
+            this.setup_tip(); return;
+	    }
+	    if (!this.chrome45 && !_this.edge)
 	    {
-	        this.setupTip(); return;
-	    }//chrome 45直接调用控件命令
-	    if (this.chrome45)
+
+            this.app.paste();
+	    }
+	    else if (this.chrome45)
 	    {
-	        if (!this.natInstalled) { this.setupTip(); return;}
-	        _this.WordParser.Paste();
-	    }//非chrome 45则进行判断
-	    else
+            this.app.paste();
+	    }
+	    else if(this.edge)
 	    {
-	        if (_this.WordParser.HasData()) _this.WordParser.Paste();
-	        else
-	    	{
-	        	return true;
-	    	}
-	    	return false;
+            this.app.paste();
 	    }
 	};
 
@@ -584,7 +367,7 @@ function WordPasterManager()
 	this.UploadNetImg = function ()
 	{
 	    var data = tinymce.activeEditor.getContent();
-	    _this.WordParser.PasteAuto(data);
+        this.app.pasteAuto(data);
 	};
 
     //加载粘贴事件	
@@ -594,23 +377,6 @@ function WordPasterManager()
 	    //{
 	    //	return _this.Paste();
 	    //});
-	};
-
-	/*
-	验证文件名是否存在
-	参数:
-		fileName 包含完整路径的文件名称
-	*/
-	this.Exist = function(fileName)
-	{
-		for (a in this.UploaderList)
-		{
-			if (this.UploaderList[a].LocalFile == fileName)
-			{
-				return true;
-			}
-		}
-		return false;
 	};
 
 	/*
@@ -773,7 +539,6 @@ function WordPasterManager()
 	};
 	this.WordParser_PostComplete = function (json)
 	{
-	    this.event.postComplete(json.value);
 	    this.imgPercent.text("100%");
 	    this.imgMsg.text("上传完成");
 	    var img = "<img src=\"";
@@ -796,7 +561,6 @@ function WordPasterManager()
 	};
 	this.File_PostComplete = function (json)
 	{
-	    this.event.postComplete(json.pathSvr);
 	    var up = this.fileMap[json.id];
 	    up.postComplete(json);
 	    delete up;//
@@ -824,9 +588,25 @@ function WordPasterManager()
 	    }
 	    this.CloseDialogFile();
 	    _this.working = false;
-	    this.event.queueComplete();
 	};
-	this.WordParser_StateChanged = function (msg)
+	this.load_complete_edge = function (json)
+	{
+        _this.app.init();
+    };
+    this.load_complete = function (json)
+    {
+        var needUpdate = true;
+        if (typeof (json.version) != "undefined")
+        {
+            this.setuped = true;
+            if (json.version == this.Config.Version) {
+                needUpdate = false;
+            }
+        }
+        if (needUpdate) this.need_update();
+        else { $('#wrapClose').click(); }
+    };
+    this.recvMessage = function (msg)
 	{
 	    var json = JSON.parse(msg);
 	    if      (json.name == "Parser_PasteWord") _this.WordParser_PasteWord(json);
@@ -841,129 +621,8 @@ function WordPasterManager()
 	    else if (json.name == "File_PostProcess") _this.File_PostProcess(json);
 	    else if (json.name == "File_PostComplete") _this.File_PostComplete(json);
 	    else if (json.name == "File_PostError") _this.File_PostError(json);
+        else if (json.name == "load_complete") _this.load_complete(json);
 	    else if (json.name == "Queue_Complete") _this.Queue_Complete(json);
-	};
-}
-
-var FileUploaderState = {
-	Ready: 0,
-	Posting: 1,
-	Stop: 2,
-	Error: 3,
-	GetNewID: 4,
-	Complete: 5,
-	WaitContinueUpload: 6,
-	None: 7,
-	Waiting: 8
-};
-
-/*
-	文件上传对象
-	参数：
-		fileID 文件唯一标识
-		filePath 包含完整路径的本地文件名称。D:\Soft\QQ.exe
-		width 图片宽度
-		height 图片高度
-	属性：
-		pMsg		显示上传信息，进度信息
-		pProcess	进度条
-		pPercent	显示百分比文字
-		pButton		按钮按钮
-		LocalFile	本地文件路径。D:\Soft\QQ.exe
-		ImageTag	图片标记。
-		InfDiv		上传信息层。
-		Separator	分隔线
-*/
-function FileUploader(fileID,filePath,mgr,width,height)
-{
-	var _this = this;
-	this.Manager = mgr;
-	this.Editor = mgr.Editor;
-	this.Config = mgr.Config;
-	this.ActiveX = mgr.ActiveX;
-	this.Fields = mgr.Fields;
-	this.Browser = mgr.Browser;
-	this.InsertHtml = mgr.InsertHtml;
-
-	this.PostLocalFile = false;//是否上传本地文件
-	this.imgW = width;
-	this.imgH = height;
-	this.LocaFile = filePath;//网络图片需要使用
-	this.State = FileUploaderState.None;
-	this.LocalFile = filePath;
-	this.FileID = fileID;
-	this.idLoc = fileID;//add(2015-12-10)
-	this.ImageTag = ""; //图片标记，在图片上传完后需要替换此标记
-
-	this.postComplete = function (json)
-	{
-	    this.pButton.text("");
-	    this.pProcess.css("width", "100%");
-	    this.pPercent.text("100%");
-	    this.pMsg.text("上传完成");
-
-	    //从上传列表中清除
-	    this.Remove();
-	    //更新编辑器中的图片标签
-	    this.FilePostComplete(json.pathSvr);
-	};
-
-	this.postError = function (json)
-	{
-	    this.pMsg.text(WordPasterError[json.value]);
-	    this.pButton.text("重试");
-	};
-
-	this.postProcess = function (json)
-	{
-	    var msg = "已上传:" + json.len + " 速度:" + json.speed + " 剩余时间:" + json.time;
-	    this.pMsg.text(msg);
-	    this.pPercent.text(json.percent);
-	    this.pProcess.css("width", json.percent);
-	};
-
-	//方法-准备
-	this.Ready = function()
-	{
-		//this.pButton.style.display = "none";
-		_this.pMsg.text("正在上传队列中等待...");
-		_this.State = FileUploaderState.Ready;
-	};
-
-	//从上传列表中删除
-	this.Remove = function()
-	{
-		//删除信息层
-		_this.InfDiv.remove();
-		//删除分隔线
-		_this.Separator.remove();
-		//清空本地文件名称
-		_this.LocalFile = "";
-	};
-
-	//停止传输
-	this.Stop = function()
-	{
-		//var obj = _this.Manager.UploaderList[fid];
-		this.ATL.Stop();
-		this.State = FileUploaderState.Stop;
-		this.pButton.text("重试");
-	};
-
-	//本地图片文件上传完毕
-	this.LocalFileComplete = function (imgSrc)
-	{
-		var img = '<img src="' + imgSrc + '"/>';
-		_this.InsertHtml(img);
-	};
-
-	//文件上传完毕
-	this.FilePostComplete = function(imgSrc)
-	{
-		//上传的本地文件
-		if (_this.PostLocalFile)
-		{
-			_this.LocalFileComplete(imgSrc);
-		}
+	    else if (json.name == "load_complete_edge") _this.load_complete_edge(json);
 	};
 }
