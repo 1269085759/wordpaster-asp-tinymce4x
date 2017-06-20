@@ -4,6 +4,7 @@ Option Explicit
 Response.Buffer=True
 %>
 <!--#include file="UpLoadClass.asp"-->
+<!--#include file="PathTool.asp"-->
 <%
 '更新记录：
 '	2012-3-28 增加创建年月
@@ -13,36 +14,18 @@ dim lngUpSize,uploader,intError
 	uploader.MaxSize  = 10000*1024
 	uploader.FileType = "gif/jpg/png/bmp"
 	'服务器域名
-	Dim domain : domain = "http://localhost:90/asp/"
-	Dim pathRoot : pathRoot = "upload/"
+	Dim domain : domain = "http://localhost:90/asp/"	
 	Dim dateNow : dateNow = Date()
-	'2012-3-7
-	Dim timeCur : timeCur = Year(dateNow) & Month(dateNow) & "/" & Day(dateNow) & "/"
-	uploader.Savepath = pathRoot & timeCur
-	
-	'自动创建上传文件夹
-	Dim folderRoot : folderRoot = Server.MapPath(pathRoot)
-	Dim folderYM : folderYM = Server.MapPath(pathRoot & Year(dateNow) & Month(dateNow))
-	Dim folder : folder = server.MapPath(uploader.Savepath)
-	Dim fs
-	Set fs = Server.CreateObject("Scripting.FileSystemObject")
-	'创建根目录
-	If(not fs.FolderExists(folderRoot)) Then
-		fs.CreateFolder(folderRoot)
-	End If
-	'创建年月目录
-	If(Not fs.FolderExists(folderYM)) Then
-		fs.CreateFolder(folderYM)
-	End If
-	'创建子目录
-	If(not fs.FolderExists(folder)) Then
-		fs.CreateFolder(folder)
-	End If
+	'存储路径：upload/年/月/日/
+	Dim filePath : filePath = "upload/" & Year(dateNow) & "/" & Month(dateNow) & "/" & Day(dateNow) & "/"
+	uploader.Savepath = filePath
+    '自动创建目录
+    MakePathSvr(filePath)	
 
 	lngUpSize = uploader.Open()
 	intError = uploader.Form("photo2_Err")
 	'输出文件名称和路径：2011-09-10-5-52-255252.jpg'
-	Response.Write(domain & uploader.Savepath & uploader.Form("ServerFileName"))
+	response.Write(domain & filePath & uploader.Form("ServerFileName"))
 	if lngUpSize>uploader.MaxSize then
 %>
 		<script language="javascript">
